@@ -38,5 +38,25 @@ services:
       redis:
         condition: service_healthy
 
+  # The Write-Behind consumer runs as a single dedicated process. Keep it at one
+  # replica: LRANGE/LMOVE batching is reliable per-consumer, but several consumers
+  # on the same queue would need per-consumer processing keys plus a reaper.
+  worker:
+    build: .
+    command: ["python", "-m", "src.worker"]
+    ports:
+      - "9100:9100"  # Prometheus metrics (events_inserted_total, ...)
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://analytics:analytics@postgres:5432/analytics
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:

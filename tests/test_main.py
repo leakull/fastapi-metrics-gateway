@@ -26,12 +26,11 @@ async def test_health_unhealthy_redis(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_lifespan_consumer_starts():
+async def test_lifespan_disposes_resources():
     from src.main import lifespan, app
     from unittest.mock import AsyncMock, patch
 
-    with patch("src.main.consumer_loop", new_callable=AsyncMock) as mock_consumer, \
-         patch("src.main.engine") as mock_engine, \
+    with patch("src.main.engine") as mock_engine, \
          patch("src.main.redis_client") as mock_redis:
 
         mock_engine.dispose = AsyncMock()

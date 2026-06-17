@@ -1,38 +1,36 @@
 from contextlib import asynccontextmanager
 
-import asyncio
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 from sqlalchemy import text
 
-from src.config import settings
 from src.database import async_session, engine, redis_client
 from src.exceptions import AppException
+from src.limiter import limiter
+from src.observability import RequestContextMiddleware, setup_logging
+from src.worker.config import QUEUE_KEY
 from src.auth.router import router as auth_router
 from src.events.router import router as events_router
 from src.analytics.router import router as analytics_router
-from src.worker.consumer import consumer_loop
 
-limiter = Limiter(key_func=get_remote_address)
+setup_logging()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    consumer_task = asyncio.create_task(consumer_loop())
+    # The Write-Behind consumer runs as a dedicated process (see src/worker/__main__.py
+    # and the `worker` service in docker-compose) so the API can scale horizontally
+    # without spawning competing consumers on the same queue.
     yield
-    consumer_task.cancel()
-    try:
-        await consumer_task
-    except asyncio.CancelledError:
-        pass
     await engine.dispose()
     await redis_client.aclose()
 
 
 app = FastAPI(title="Analytics Gateway", lifespan=lifespan)
+app.add_middleware(RequestContextMiddleware)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -47,6 +45,11 @@ app.include_router(events_router, prefix="/api/v1/events", tags=["events"])
 app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])
 
 
+@app.get("/metrics")
+async def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 @app.get("/health")
 async def health():
     try:
@@ -54,6 +57,7 @@ async def health():
             await session.execute(text("SELECT 1"))
             await session.commit()
         await redis_client.ping()
+        queue_depth = await redis_client.llen(QUEUE_KEY)
     except Exception:
         return JSONResponse(status_code=503, content={"status": "unhealthy"})
-    return {"status": "ok"}
+    return {"status": "ok", "queue_depth": queue_depth}

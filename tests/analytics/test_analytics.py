@@ -155,18 +155,22 @@ async def test_summary_correct_unique_users(client: AsyncClient, auth_headers: d
 
 @pytest.mark.asyncio
 async def test_summary_cache_hit(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_redis):
+    from datetime import datetime, timezone
+
+    # A closed past range is cacheable (ranges reaching today are intentionally not).
     await db_session.execute(insert(Event), [{
         "company_id": 1,
         "user_id": "cache-user",
         "event_type": "page_view",
         "payload": {},
+        "created_at": datetime(2025, 6, 15, tzinfo=timezone.utc),
     }])
     await db_session.commit()
 
     await client.get(
         "/api/v1/analytics/summary/",
         headers=auth_headers,
-        params={"start_date": "2026-01-01", "end_date": "2026-12-31"},
+        params={"start_date": "2025-01-01", "end_date": "2025-12-31"},
     )
 
     keys = await test_redis.keys("cache:analytics:*")
@@ -175,7 +179,7 @@ async def test_summary_cache_hit(client: AsyncClient, auth_headers: dict, db_ses
     resp2 = await client.get(
         "/api/v1/analytics/summary/",
         headers=auth_headers,
-        params={"start_date": "2026-01-01", "end_date": "2026-12-31"},
+        params={"start_date": "2025-01-01", "end_date": "2025-12-31"},
     )
     assert resp2.status_code == 200
     assert resp2.json()["total_events"] >= 1
@@ -200,20 +204,79 @@ async def test_summary_repository_direct(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_cache_service_direct(test_redis, db_session: AsyncSession):
-    from src.analytics.service import get_cached_summary
-    from datetime import date
+async def test_summary_includes_full_end_date(db_session: AsyncSession):
+    """An event late on the last day of the range must be counted (no off-by-one)."""
+    from src.analytics.repositories import get_summary
+    from datetime import date, datetime, timezone
 
     await db_session.execute(insert(Event), [{
-        "company_id": 99, "user_id": "cache-test", "event_type": "view", "payload": {},
+        "company_id": 7,
+        "user_id": "edge",
+        "event_type": "click",
+        "payload": {},
+        "created_at": datetime(2026, 3, 15, 23, 59, 59, tzinfo=timezone.utc),
     }])
     await db_session.commit()
 
-    result = await get_cached_summary(test_redis, db_session, 99, date(2026, 1, 1), date(2026, 12, 31))
+    result = await get_summary(db_session, 7, date(2026, 3, 1), date(2026, 3, 15))
+    assert result["total_events"] == 1
+    assert result["total_users"] == 1
+
+
+@pytest.mark.asyncio
+async def test_summary_excludes_day_after_end_date(db_session: AsyncSession):
+    """An event on the day after end_date must NOT be counted."""
+    from src.analytics.repositories import get_summary
+    from datetime import date, datetime, timezone
+
+    await db_session.execute(insert(Event), [{
+        "company_id": 8,
+        "user_id": "out",
+        "event_type": "click",
+        "payload": {},
+        "created_at": datetime(2026, 3, 16, 0, 0, 1, tzinfo=timezone.utc),
+    }])
+    await db_session.commit()
+
+    result = await get_summary(db_session, 8, date(2026, 3, 1), date(2026, 3, 15))
+    assert result["total_events"] == 0
+
+
+@pytest.mark.asyncio
+async def test_cache_service_direct(test_redis, db_session: AsyncSession):
+    from src.analytics.service import get_cached_summary
+    from datetime import date, datetime, timezone
+
+    await db_session.execute(insert(Event), [{
+        "company_id": 99, "user_id": "cache-test", "event_type": "view", "payload": {},
+        "created_at": datetime(2025, 6, 15, tzinfo=timezone.utc),
+    }])
+    await db_session.commit()
+
+    result = await get_cached_summary(test_redis, db_session, 99, date(2025, 1, 1), date(2025, 12, 31))
     assert result["total_events"] == 1
 
-    cached = await test_redis.get("cache:analytics:99:2026-01-01:2026-12-31")
+    cached = await test_redis.get("cache:analytics:99:2025-01-01:2025-12-31")
     assert cached is not None
 
-    result2 = await get_cached_summary(test_redis, db_session, 99, date(2026, 1, 1), date(2026, 12, 31))
+    result2 = await get_cached_summary(test_redis, db_session, 99, date(2025, 1, 1), date(2025, 12, 31))
     assert result2["total_events"] == 1
+
+
+@pytest.mark.asyncio
+async def test_summary_today_range_not_cached(test_redis, db_session: AsyncSession):
+    """Ranges that reach today must not be cached (data is still changing)."""
+    from src.analytics.service import get_cached_summary
+    from datetime import date, datetime, timezone
+
+    await test_redis.flushdb()
+    await db_session.execute(insert(Event), [{
+        "company_id": 123, "user_id": "live", "event_type": "view", "payload": {},
+    }])
+    await db_session.commit()
+
+    today = datetime.now(timezone.utc).date()
+    await get_cached_summary(test_redis, db_session, 123, date(today.year, 1, 1), today)
+
+    keys = await test_redis.keys("cache:analytics:123:*")
+    assert keys == []

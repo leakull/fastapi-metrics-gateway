@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("hashed_password", sa.String(255), nullable=False),
         sa.Column("company_id", sa.Integer(), nullable=False),
         sa.Column("is_active", sa.Boolean(), server_default="true"),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
 
     op.create_table(
@@ -34,7 +34,7 @@ def upgrade() -> None:
         sa.Column("user_id", sa.String(255), nullable=False, index=True),
         sa.Column("event_type", sa.String(255), nullable=False),
         sa.Column("payload", postgresql.JSONB(), nullable=False),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
 
     op.create_index("ix_events_company_event_type", "events", ["company_id", "event_type"])

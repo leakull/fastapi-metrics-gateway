@@ -10,7 +10,9 @@
 - **Кэш / Очередь:** Redis 7
 - **Аутентификация:** JWT (python-jose) + Argon2
 - **Rate Limiting:** slowapi
-- **Контейнеризация:** Docker + Docker Compose
+- **Мониторинг:** Prometheus (prometheus-client) + structured logging с request-id
+- **Контейнеризация:** Docker (multi-stage, non-root) + Docker Compose
+- **CI:** GitHub Actions (pytest на Postgres + Redis)
 - **Тестирование:** pytest + pytest-asyncio + httpx
 
 ## Архитектура
@@ -114,6 +116,7 @@ open http://localhost:8080/docs
 | Сервис | Порт | Описание |
 |--------|------|----------|
 | API | 8080 | FastAPI приложение |
+| Worker | — | Фоновый консьюмер (Write-Behind), один экземпляр |
 | PostgreSQL | 5434 | База данных |
 | Redis | 6381 | Кэш и очередь событий |
 
@@ -131,7 +134,9 @@ open http://localhost:8080/docs
 
 | Метод | Путь | Описание | Авторизация |
 |-------|------|----------|-------------|
-| POST | `/api/v1/events/` | Отправка события в очередь | Bearer |
+| POST | `/api/v1/events/` | Отправка события в очередь (idempotent по `event_id`) | Bearer |
+
+Ответ `202` возвращает `event_id` — назначенный ключ идемпотентности. Повторная отправка с тем же `event_id` (своим или возвращённым сервером) не создаст дубликат: консьюмер вставляет события с `ON CONFLICT (id) DO NOTHING`.
 
 ### Аналитика
 
@@ -143,7 +148,10 @@ open http://localhost:8080/docs
 
 | Метод | Путь | Описание |
 |-------|------|----------|
-| GET | `/health` | Проверка здоровья (DB + Redis) |
+| GET | `/health` | Проверка здоровья (DB + Redis) + глубина очереди (`queue_depth`) |
+| GET | `/metrics` | Метрики Prometheus (API) |
+
+Воркер экспортирует свои метрики (`events_inserted_total` и др.) на отдельном порту `:9100`.
 
 ## Примеры запросов
 
@@ -185,6 +193,7 @@ curl "http://localhost:8080/api/v1/analytics/summary/?start_date=2026-01-01&end_
 
 | Переменная | По умолчанию | Описание |
 |------------|-------------|----------|
+| `ENVIRONMENT` | `development` | Окружение. При `production` приложение не стартует с дефолтным `JWT_SECRET` |
 | `DATABASE_URL` | `postgresql+asyncpg://analytics:analytics@localhost:5432/analytics` | URL подключения к PostgreSQL |
 | `REDIS_URL` | `redis://localhost:6379/0` | URL подключения к Redis |
 | `JWT_SECRET` | — | Секрет для подписи JWT токенов |
@@ -283,11 +292,25 @@ python3 -m pytest tests/ --ignore=tests/e2e --cov=src --cov-report=term-missing
 
 - **Низкий latency** ответа API (202 Accepted без ожидания записи в БД)
 - **Устойчивость к пиковым нагрузкам** (очередь сглаживает всплески)
-- **Атомарность** (LMOVE для exactly-once семантики при параллельных consumer'ах)
+- **Гарантию доставки (at-least-once)**: батч атомарно переносится в `queue:events:processing` через `LMOVE` и удаляется только после успешного `COMMIT`. Если процесс упал между чтением и записью, элементы остаются в processing-списке и восстанавливаются при следующем старте. При сбое между `COMMIT` и удалением possible повтор — это **at-least-once**, а не exactly-once; для дедупликации можно передавать клиентский `event_id`.
+
+> **Топология:** консьюмер запускается как **отдельный процесс** (`python -m src.worker`, сервис `worker` в docker-compose) — намеренно один экземпляр. Это исключает гонку нескольких консьюмеров на одной очереди. Для масштабирования консьюмера понадобятся per-consumer processing-ключи + reaper по heartbeat.
 
 ### Кэширование аналитики
 
 Результаты аналитических запросов кэшируются в Redis с TTL 5 минут. При повторном запросе с теми же параметрами данные отдаются из кэша без обращения к PostgreSQL.
+
+Диапазоны, **доходящие до сегодняшнего дня, не кэшируются** — в них ещё поступают события, поэтому кэш отдавал бы устаревшие цифры. Кэшируются только закрытые прошлые периоды.
+
+### Идемпотентность приёма
+
+Каждому событию при постановке в очередь присваивается стабильный `id` (можно передать свой `event_id`). Консьюмер вставляет батч с `ON CONFLICT (id) DO NOTHING`, поэтому повторная обработка (например, при перезапуске воркера после сбоя) не создаёт дубликатов — это закрывает слабое место at-least-once доставки.
+
+### Наблюдаемость
+
+- **Метрики Prometheus**: `events_enqueued_total`, `events_inserted_total`, `analytics_cache_hits_total` / `_misses_total`, гистограмма латентности `http_request_duration_seconds`. API — на `/metrics`, воркер — на `:9100`.
+- **Structured logging**: каждый лог содержит `request_id` (берётся из заголовка `X-Request-ID` либо генерируется), который также возвращается клиенту в ответе.
+- **Healthcheck** дополнительно отдаёт глубину очереди (`queue_depth`) для мониторинга backlog.
 
 ### BRIN-индекс
 

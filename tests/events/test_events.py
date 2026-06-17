@@ -17,7 +17,11 @@ async def test_create_event(client: AsyncClient, auth_headers: dict, test_redis)
         },
     )
     assert resp.status_code == 202
-    assert resp.json() == {"status": "queued"}
+    body = resp.json()
+    assert body["status"] == "queued"
+    # The server returns the idempotency key it assigned.
+    import uuid
+    uuid.UUID(body["event_id"])
 
     queue_len = await test_redis.llen("queue:events")
     assert queue_len >= 1

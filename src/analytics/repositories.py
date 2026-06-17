@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,10 +7,13 @@ from src.events.models import Event
 
 
 async def get_summary(session: AsyncSession, company_id: int, start_date: date, end_date: date) -> dict:
+    # created_at is a timestamp, so comparing it against a bare date coerces the date to
+    # midnight. Use an exclusive upper bound of (end_date + 1 day) so the whole of
+    # end_date is included instead of being cut off at 00:00:00.
     date_filter = (
         Event.company_id == company_id,
         Event.created_at >= start_date,
-        Event.created_at <= end_date,
+        Event.created_at < end_date + timedelta(days=1),
     )
 
     total_users_q = await session.execute(

@@ -6,8 +6,14 @@ import redis.asyncio as aioredis
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from src.limiter import limiter
 from src.main import app
 from src.models import Base
+
+# Rate limiting uses a single in-memory counter for the whole process, so leaving it
+# on would let calls accumulate across tests and trip the limit. Disable it for unit
+# tests; limit behaviour is exercised separately in test_auth.test_rate_limit_returns_429.
+limiter.enabled = False
 
 TEST_DATABASE_URL = "postgresql+asyncpg://analytics:analytics@localhost:5434/analytics"
 TEST_REDIS_URL = "redis://localhost:6381/0"
@@ -54,7 +60,7 @@ async def client(engine, test_redis) -> AsyncGenerator[AsyncClient, None]:
 
     with patch("src.events.service.redis_client", test_redis), \
          patch("src.worker.consumer.redis_client", test_redis), \
-         patch("src.analytics.service.redis_client", test_redis), \
+         patch("src.main.redis_client", test_redis), \
          patch("src.analytics.router.redis_client", test_redis):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:

@@ -156,3 +156,92 @@ async def test_consumer_db_error_retry(engine, test_redis):
         result = await session.execute(select(Event).where(Event.user_id == "retry-user"))
         row = result.scalar_one_or_none()
         assert row is not None
+
+
+@pytest.mark.asyncio
+async def test_consumer_recovers_processing_on_startup(engine, test_redis):
+    """Items stranded in the processing list by a crashed run must be re-inserted."""
+    from src.worker.config import PROCESSING_KEY, QUEUE_KEY
+
+    await test_redis.delete(QUEUE_KEY)
+    await test_redis.delete(PROCESSING_KEY)
+
+    # Simulate a previous crash: a batch was moved to processing but never committed.
+    for i in range(3):
+        await test_redis.rpush(PROCESSING_KEY, json.dumps({
+            "company_id": 1,
+            "user_id": f"recovered-{i}",
+            "event_type": "test",
+            "payload": {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }))
+
+    from src.worker.consumer import consumer_loop
+
+    iteration_count = 0
+
+    async def mock_sleep(_):
+        nonlocal iteration_count
+        iteration_count += 1
+        if iteration_count >= 1:
+            raise StopAsyncIteration()
+
+    test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    with patch("src.worker.consumer.redis_client", test_redis), \
+         patch("src.worker.consumer.async_session", test_session_factory), \
+         patch("src.worker.consumer.asyncio.sleep", mock_sleep):
+        with pytest.raises(StopAsyncIteration):
+            await consumer_loop()
+
+    async with test_session_factory() as session:
+        result = await session.execute(select(Event).where(Event.user_id.like("recovered-%")))
+        rows = result.scalars().all()
+
+    assert len(rows) == 3
+    assert await test_redis.llen(QUEUE_KEY) == 0
+    assert await test_redis.llen(PROCESSING_KEY) == 0
+
+
+@pytest.mark.asyncio
+async def test_consumer_dedup_on_event_id(engine, test_redis):
+    """Two queue entries with the same id must produce a single row (ON CONFLICT)."""
+    import uuid as uuidlib
+    from sqlalchemy import func
+
+    await test_redis.delete("queue:events")
+
+    event_id = str(uuidlib.uuid4())
+    for _ in range(2):
+        await test_redis.rpush("queue:events", json.dumps({
+            "id": event_id,
+            "company_id": 1,
+            "user_id": "dup-user",
+            "event_type": "test",
+            "payload": {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }))
+
+    from src.worker.consumer import consumer_loop
+    iteration_count = 0
+
+    async def mock_sleep(_):
+        nonlocal iteration_count
+        iteration_count += 1
+        if iteration_count >= 1:
+            raise StopAsyncIteration()
+
+    test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    with patch("src.worker.consumer.redis_client", test_redis), \
+         patch("src.worker.consumer.async_session", test_session_factory), \
+         patch("src.worker.consumer.asyncio.sleep", mock_sleep):
+        with pytest.raises(StopAsyncIteration):
+            await consumer_loop()
+
+    async with test_session_factory() as session:
+        result = await session.execute(
+            select(func.count()).select_from(Event).where(Event.user_id == "dup-user")
+        )
+        count = result.scalar()
+    assert count == 1
