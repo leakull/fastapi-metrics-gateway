@@ -58,7 +58,12 @@ async def client(engine, test_redis) -> AsyncGenerator[AsyncClient, None]:
     from src.auth.dependencies import get_db
     app.dependency_overrides[get_db] = override_get_db
 
-    with patch("src.database.get_redis", return_value=test_redis):
+    with patch("src.database.get_redis", return_value=test_redis), \
+         patch("src.main.get_redis", return_value=test_redis), \
+         patch("src.events.service.get_redis", return_value=test_redis), \
+         patch("src.auth.service.get_redis", return_value=test_redis), \
+         patch("src.worker.consumer.get_redis", return_value=test_redis), \
+         patch("src.analytics.router.get_redis", return_value=test_redis):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac

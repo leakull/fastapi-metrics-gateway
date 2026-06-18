@@ -25,7 +25,7 @@ async def test_consumer_empty_queue(engine, test_redis):
 
     test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    with patch("src.worker.consumer.redis_client", test_redis), \
+    with patch("src.worker.consumer.get_redis", return_value=test_redis), \
          patch("src.worker.consumer.async_session", test_session_factory), \
          patch("src.worker.consumer.asyncio.sleep", mock_sleep):
         with pytest.raises(StopAsyncIteration):
@@ -56,7 +56,7 @@ async def test_consumer_timezone_utc(engine, test_redis):
 
     test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    with patch("src.worker.consumer.redis_client", test_redis), \
+    with patch("src.worker.consumer.get_redis", return_value=test_redis), \
          patch("src.worker.consumer.async_session", test_session_factory), \
          patch("src.worker.consumer.asyncio.sleep", mock_sleep):
         with pytest.raises(StopAsyncIteration):
@@ -92,7 +92,7 @@ async def test_consumer_graceful_shutdown(engine, test_redis):
 
     test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    with patch("src.worker.consumer.redis_client", test_redis), \
+    with patch("src.worker.consumer.get_redis", return_value=test_redis), \
          patch("src.worker.consumer.async_session", test_session_factory), \
          patch("src.worker.consumer.asyncio.sleep", mock_sleep):
         await consumer_loop()
@@ -145,7 +145,7 @@ async def test_consumer_db_error_retry(engine, test_redis):
         async def __aexit__(self, *args):
             pass
 
-    with patch("src.worker.consumer.redis_client", test_redis), \
+    with patch("src.worker.consumer.get_redis", return_value=test_redis), \
          patch("src.worker.consumer.async_session", EventuallyWorkingSession), \
          patch("src.worker.consumer.asyncio.sleep", mock_sleep):
         with pytest.raises(StopAsyncIteration):
@@ -188,7 +188,7 @@ async def test_consumer_recovers_processing_on_startup(engine, test_redis):
 
     test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    with patch("src.worker.consumer.redis_client", test_redis), \
+    with patch("src.worker.consumer.get_redis", return_value=test_redis), \
          patch("src.worker.consumer.async_session", test_session_factory), \
          patch("src.worker.consumer.asyncio.sleep", mock_sleep):
         with pytest.raises(StopAsyncIteration):
@@ -233,7 +233,7 @@ async def test_consumer_dedup_on_event_id(engine, test_redis):
 
     test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    with patch("src.worker.consumer.redis_client", test_redis), \
+    with patch("src.worker.consumer.get_redis", return_value=test_redis), \
          patch("src.worker.consumer.async_session", test_session_factory), \
          patch("src.worker.consumer.asyncio.sleep", mock_sleep):
         with pytest.raises(StopAsyncIteration):

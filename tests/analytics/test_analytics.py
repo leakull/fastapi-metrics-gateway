@@ -74,7 +74,7 @@ async def test_consumer_bulk_insert(engine, test_redis):
 
     test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    with patch("src.worker.consumer.redis_client", test_redis), \
+    with patch("src.worker.consumer.get_redis", return_value=test_redis), \
          patch("src.worker.consumer.async_session", test_session_factory), \
          patch("src.worker.consumer.asyncio.sleep", mock_sleep):
         with pytest.raises(StopAsyncIteration):
