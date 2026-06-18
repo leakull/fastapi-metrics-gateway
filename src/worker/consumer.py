@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from src.database import async_session, redis_client
 from src.events.models import Event
 from src.metrics import events_inserted_total
-from src.worker.config import BATCH_INTERVAL, BATCH_SIZE, PROCESSING_KEY, QUEUE_KEY
+from src.worker.config import BATCH_INTERVAL, BATCH_SIZE, HEARTBEAT_KEY, HEARTBEAT_TTL, PROCESSING_KEY, QUEUE_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,7 @@ async def consumer_loop():
                     await session.commit()
                 # Commit succeeded: acknowledge by dropping the processing list.
                 await redis_client.delete(PROCESSING_KEY)
+                await redis_client.set(HEARTBEAT_KEY, datetime.now(timezone.utc).isoformat(), ex=HEARTBEAT_TTL)
                 events_inserted_total.inc(len(items))
                 logger.info("Inserted %d events", len(items))
             except asyncio.CancelledError:

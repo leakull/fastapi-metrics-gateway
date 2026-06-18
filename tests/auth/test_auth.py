@@ -153,13 +153,14 @@ async def test_get_me_invalid_token(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_get_me_expired_token(client: AsyncClient):
-    from jose import jwt
+    import jwt
     from src.config import settings
     from datetime import datetime, timedelta, timezone
 
     expired_payload = {
         "sub": "00000000-0000-0000-0000-000000000000",
         "exp": datetime.now(timezone.utc) - timedelta(hours=1),
+        "type": "access",
     }
     token = jwt.encode(expired_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
@@ -219,10 +220,10 @@ async def test_rate_limit_returns_429(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_get_me_token_without_sub(client: AsyncClient):
-    from jose import jwt
+    import jwt
     from src.config import settings
 
-    token = jwt.encode({"exp": "bad"}, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    token = jwt.encode({"exp": "bad", "type": "access"}, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
     resp = await client.get(
         "/api/v1/auth/me/",
         headers={"Authorization": f"Bearer {token}"},
@@ -233,13 +234,13 @@ async def test_get_me_token_without_sub(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_get_me_nonexistent_user(client: AsyncClient):
     import uuid
-    from jose import jwt
+    import jwt
     from src.config import settings
     from datetime import datetime, timedelta, timezone
 
     fake_id = str(uuid.uuid4())
     token = jwt.encode(
-        {"sub": fake_id, "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
+        {"sub": fake_id, "exp": datetime.now(timezone.utc) + timedelta(hours=1), "type": "access"},
         settings.JWT_SECRET,
         algorithm=settings.JWT_ALGORITHM,
     )

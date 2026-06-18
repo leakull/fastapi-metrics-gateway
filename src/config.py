@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6381/0"
     JWT_SECRET: str = DEFAULT_JWT_SECRET
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 30
+    JWT_EXPIRE_MINUTES: int = 15
+    JWT_REFRESH_EXPIRE_DAYS: int = 7
     BATCH_INTERVAL: int = 5
     BATCH_SIZE: int = 1000
 

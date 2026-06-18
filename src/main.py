@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 
+from datetime import datetime, timezone
+
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -11,7 +13,7 @@ from src.database import async_session, engine, redis_client
 from src.exceptions import AppException
 from src.limiter import limiter
 from src.observability import RequestContextMiddleware, setup_logging
-from src.worker.config import QUEUE_KEY
+from src.worker.config import HEARTBEAT_KEY, HEARTBEAT_TTL, QUEUE_KEY
 from src.auth.router import router as auth_router
 from src.events.router import router as events_router
 from src.analytics.router import router as analytics_router
@@ -58,6 +60,17 @@ async def health():
             await session.commit()
         await redis_client.ping()
         queue_depth = await redis_client.llen(QUEUE_KEY)
+
+        worker_alive = False
+        try:
+            last_heartbeat = await redis_client.get(HEARTBEAT_KEY)
+            if last_heartbeat:
+                hb_time = datetime.fromisoformat(last_heartbeat)
+                if hb_time.tzinfo is None:
+                    hb_time = hb_time.replace(tzinfo=timezone.utc)
+                worker_alive = (datetime.now(timezone.utc) - hb_time).total_seconds() < HEARTBEAT_TTL
+        except Exception:
+            pass
     except Exception:
         return JSONResponse(status_code=503, content={"status": "unhealthy"})
-    return {"status": "ok", "queue_depth": queue_depth}
+    return {"status": "ok", "queue_depth": queue_depth, "worker": "ok" if worker_alive else "dead"}

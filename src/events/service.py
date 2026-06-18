@@ -1,10 +1,14 @@
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from src.database import redis_client
+from src.exceptions import AppException
 from src.metrics import events_enqueued_total
 from src.worker.config import QUEUE_KEY
+
+logger = logging.getLogger(__name__)
 
 
 async def queue_event(event_data: dict) -> uuid.UUID:
@@ -18,6 +22,11 @@ async def queue_event(event_data: dict) -> uuid.UUID:
     else:
         event_data["created_at"] = event_data["created_at"].isoformat()
 
-    await redis_client.rpush(QUEUE_KEY, json.dumps(event_data))
+    try:
+        await redis_client.rpush(QUEUE_KEY, json.dumps(event_data))
+    except Exception:
+        logger.exception("Failed to enqueue event to Redis")
+        raise AppException(status_code=503, message="Event queue temporarily unavailable")
+
     events_enqueued_total.inc()
     return event_id
