@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.database import async_session, redis_client
+from src.database import async_session, get_redis
 from src.events.models import Event
 from src.metrics import events_inserted_total
 from src.worker.config import BATCH_INTERVAL, BATCH_SIZE, HEARTBEAT_KEY, HEARTBEAT_TTL, PROCESSING_KEY, QUEUE_KEY
@@ -33,8 +33,9 @@ async def _drain_batch() -> list[str]:
     it lives in the processing list until the batch is committed and acknowledged.
     """
     raw_items: list[str] = []
+    redis = get_redis()
     for _ in range(BATCH_SIZE):
-        item = await redis_client.lmove(QUEUE_KEY, PROCESSING_KEY, "left", "right")
+        item = await redis.lmove(QUEUE_KEY, PROCESSING_KEY, "left", "right")
         if item is None:
             break
         raw_items.append(item)
@@ -47,7 +48,8 @@ async def _restore_processing() -> None:
     Used both for crash recovery on startup and to retry a batch whose insert failed.
     """
     restored = 0
-    while await redis_client.lmove(PROCESSING_KEY, QUEUE_KEY, "right", "left") is not None:
+    redis = get_redis()
+    while await redis.lmove(PROCESSING_KEY, QUEUE_KEY, "right", "left") is not None:
         restored += 1
     if restored:
         logger.info("Restored %d in-flight events back to the queue", restored)
@@ -74,8 +76,9 @@ async def consumer_loop():
                     await session.execute(stmt, items)
                     await session.commit()
                 # Commit succeeded: acknowledge by dropping the processing list.
-                await redis_client.delete(PROCESSING_KEY)
-                await redis_client.set(HEARTBEAT_KEY, datetime.now(timezone.utc).isoformat(), ex=HEARTBEAT_TTL)
+                redis = get_redis()
+                await redis.delete(PROCESSING_KEY)
+                await redis.set(HEARTBEAT_KEY, datetime.now(timezone.utc).isoformat(), ex=HEARTBEAT_TTL)
                 events_inserted_total.inc(len(items))
                 logger.info("Inserted %d events", len(items))
             except asyncio.CancelledError:

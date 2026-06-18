@@ -23,7 +23,7 @@ async def test_health_worker_ok_when_heartbeat_recent():
     mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
     with patch("src.main.async_session", mock_session_factory), \
-         patch("src.main.redis_client", mock_redis):
+         patch("src.main.get_redis", return_value=mock_redis):
         from src.main import health
         result = await health()
         assert result["worker"] == "ok"
@@ -48,7 +48,7 @@ async def test_health_worker_dead_when_heartbeat_old():
     mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
     with patch("src.main.async_session", mock_session_factory), \
-         patch("src.main.redis_client", mock_redis):
+         patch("src.main.get_redis", return_value=mock_redis):
         from src.main import health
         result = await health()
         assert result["worker"] == "dead"
@@ -71,7 +71,7 @@ async def test_health_worker_dead_when_no_heartbeat():
     mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
     with patch("src.main.async_session", mock_session_factory), \
-         patch("src.main.redis_client", mock_redis):
+         patch("src.main.get_redis", return_value=mock_redis):
         from src.main import health
         result = await health()
         assert result["worker"] == "dead"
@@ -89,7 +89,7 @@ async def test_health_unhealthy_when_db_down():
     mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
     with patch("src.main.async_session", mock_session_factory), \
-         patch("src.main.redis_client", mock_redis):
+         patch("src.main.get_redis", return_value=mock_redis):
         from src.main import health
         from fastapi.responses import JSONResponse
         result = await health()

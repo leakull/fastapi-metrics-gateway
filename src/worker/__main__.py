@@ -3,7 +3,7 @@ import logging
 
 from prometheus_client import start_http_server
 
-from src.database import engine, redis_client
+from src.database import engine, close_redis
 from src.observability import setup_logging
 from src.worker.consumer import consumer_loop
 
@@ -19,7 +19,7 @@ async def main() -> None:
         await consumer_loop()
     finally:
         await engine.dispose()
-        await redis_client.aclose()
+        await close_redis()
 
 
 if __name__ == "__main__":

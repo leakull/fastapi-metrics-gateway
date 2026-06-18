@@ -38,7 +38,7 @@ async def test_redis_failure_returns_503():
     mock_redis = AsyncMock()
     mock_redis.rpush = AsyncMock(side_effect=Exception("Redis connection refused"))
 
-    with patch("src.events.service.redis_client", mock_redis):
+    with patch("src.database.get_redis", return_value=mock_redis):
         from src.events.service import queue_event
         from src.exceptions import AppException
 

@@ -7,7 +7,7 @@ from src.analytics.schemas import SummaryResponse
 from src.analytics.service import get_cached_summary
 from src.auth.dependencies import get_current_active_user, get_db
 from src.auth.models import User
-from src.database import redis_client
+from src.database import get_redis
 from src.limiter import limiter
 
 router = APIRouter()
@@ -25,6 +25,6 @@ async def summary(
     if start_date > end_date:
         raise HTTPException(status_code=422, detail="start_date must be before end_date")
     result = await get_cached_summary(
-        redis_client, db, current_user.company_id, start_date, end_date
+        get_redis(), db, current_user.company_id, start_date, end_date
     )
     return result

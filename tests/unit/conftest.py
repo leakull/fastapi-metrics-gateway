@@ -33,17 +33,11 @@ async def client(fake_redis) -> AsyncGenerator[AsyncClient, None]:
     from src.auth.dependencies import get_db
     app_patcher = patch("src.main.async_session", new_callable=MagicMock)
     db_patcher = patch("src.auth.dependencies.async_session", new_callable=MagicMock)
-    redis_event_patcher = patch("src.events.service.redis_client", fake_redis)
-    redis_consumer_patcher = patch("src.worker.consumer.redis_client", fake_redis)
-    redis_main_patcher = patch("src.main.redis_client", fake_redis)
-    redis_analytics_patcher = patch("src.analytics.router.redis_client", fake_redis)
+    redis_patcher = patch("src.database.get_redis", return_value=fake_redis)
 
     with app_patcher as mock_app_session, \
          db_patcher as mock_db_session, \
-         redis_event_patcher, \
-         redis_consumer_patcher, \
-         redis_main_patcher, \
-         redis_analytics_patcher:
+         redis_patcher:
 
         mock_app_session.return_value.__aenter__ = AsyncMock()
         mock_app_session.return_value.__aexit__ = AsyncMock(return_value=False)

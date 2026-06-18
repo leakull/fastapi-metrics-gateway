@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import jwt as pyjwt
+
 from src.auth.dependencies import get_current_active_user, get_db
 from src.auth.models import User
 from src.auth.schemas import LoginRequest, RefreshRequest, Token, UserCreate, UserResponse
@@ -12,6 +14,7 @@ from src.auth.service import (
     revoke_refresh_token,
     verify_refresh_token,
 )
+from src.config import settings
 from src.limiter import limiter
 
 router = APIRouter()
@@ -38,12 +41,18 @@ async def login(request: Request, user_data: LoginRequest, db: AsyncSession = De
 @router.post("/refresh/", response_model=Token)
 @limiter.limit("20/minute")
 async def refresh(request: Request, body: RefreshRequest):
+    try:
+        unverified = pyjwt.decode(body.refresh_token, options={"verify_signature": False})
+        family = unverified.get("family")
+    except Exception:
+        family = None
+
     user_id = await verify_refresh_token(body.refresh_token)
     if user_id is None:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
     await revoke_refresh_token(body.refresh_token)
     access_token = create_access_token(data={"sub": user_id})
-    refresh_token = await create_refresh_token(user_id)
+    refresh_token = await create_refresh_token(user_id, family=family)
     return Token(access_token=access_token, refresh_token=refresh_token)
 
 
