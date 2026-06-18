@@ -36,7 +36,7 @@ def test_settings_defaults():
         JWT_SECRET="test-secret",
     )
     assert s.JWT_ALGORITHM == "HS256"
-    assert s.JWT_EXPIRE_MINUTES == 30
+    assert s.JWT_EXPIRE_MINUTES == 15
     assert s.BATCH_INTERVAL == 5
     assert s.BATCH_SIZE == 1000
 

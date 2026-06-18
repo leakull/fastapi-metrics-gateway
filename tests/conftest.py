@@ -61,7 +61,8 @@ async def client(engine, test_redis) -> AsyncGenerator[AsyncClient, None]:
     with patch("src.events.service.redis_client", test_redis), \
          patch("src.worker.consumer.redis_client", test_redis), \
          patch("src.main.redis_client", test_redis), \
-         patch("src.analytics.router.redis_client", test_redis):
+         patch("src.analytics.router.redis_client", test_redis), \
+         patch("src.auth.service.redis_client", test_redis):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
